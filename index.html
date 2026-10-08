@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<title>PDF Compressor</title>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--tx:#1e293b;--mut:#64748b;--ac:#2563eb;--bd:#cbd5e1}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--tx:#f1f5f9;--mut:#94a3b8;--bd:#475569}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100dvh;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,sans-serif;padding:max(16px,env(safe-area-inset-top)) 14px max(16px,env(safe-area-inset-bottom))}
+.wrap{max-width:520px;margin:0 auto}
+.card{background:var(--card);border-radius:16px;padding:18px;box-shadow:0 2px 10px #0002}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:10px}
+h1{font-size:19px;margin:0}
+.lang{display:flex;gap:4px}
+.lang button{width:auto;margin:0;padding:8px 10px;font-size:13px;background:transparent;color:var(--tx);border:1px solid var(--bd);border-radius:8px;min-height:40px}
+.lang button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+label{display:block;margin:14px 0 6px;font-size:14px;color:var(--mut)}
+input[type=file],input[type=number]{width:100%;padding:12px;font-size:16px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx)}
+.chk{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:14px}
+.chk input{width:22px;height:22px}
+#go{margin-top:18px;width:100%;min-height:52px;border:0;border-radius:12px;background:var(--ac);color:#fff;font-size:17px;font-weight:600}
+#go:disabled{opacity:.5}
+.bar{height:10px;background:var(--bd);border-radius:6px;margin-top:18px;overflow:hidden}
+.bar div{height:100%;width:0;background:var(--ac)}
+#log{margin-top:10px;font-size:14px;color:var(--mut);white-space:pre-line;min-height:40px}
+#dl{display:none;margin-top:12px;text-align:center;padding:15px;background:#16a34a;color:#fff;border-radius:12px;text-decoration:none;font-weight:600;font-size:16px}
+.note{margin-top:14px;font-size:12px;color:var(--mut)}
+</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+ <div class="top"><h1 id="t_title"></h1>
+  <div class="lang"><button data-l="ru">RU</button><button data-l="kk">ҚАЗ</button><button data-l="uz">UZ</button></div></div>
+ <label id="t_file"></label>
+ <input type="file" id="file" accept="application/pdf,.pdf">
+ <label id="t_target"></label>
+ <input type="number" id="target" value="5" min="0.3" step="0.5" inputmode="decimal">
+ <label class="chk"><input type="checkbox" id="fast" checked><span id="t_fast"></span></label>
+ <button id="go"></button>
+ <div class="bar"><div id="pb"></div></div>
+ <div id="log"></div>
+ <a id="dl"></a>
+ <div class="note" id="t_note"></div>
+</div></div>
+
+<script>
+const I18N={
+ru:{title:'Сжатие PDF',file:'PDF файл',target:'Нужный размер (МБ)',fast:'Быстрый режим (меньше проходов)',go:'Сжать',
+ pick:'Сначала выберите PDF.',read:'Читаю файл...',est:(d,q,s)=>`Оценка: ${d} DPI, качество ${q} → ~${s}`,
+ page:(i,n)=>`Страница ${i} / ${n}`,again:'Всё ещё велик, снижаю качество и повторяю...',
+ done:(a,b)=>`Готово! ${a} → ${b}`,miss:'Внимание: до цели не дошло, попробуйте увеличить целевой размер.',
+ dl:s=>`Скачать (${s})`,err:'Ошибка: ',
+ note:'Текст станет изображением (нельзя выделить и искать). На телефоне большие файлы (100+ МБ) могут не поместиться в память: используйте компьютер.'},
+kk:{title:'PDF сығу',file:'PDF файл',target:'Қажетті өлшем (МБ)',fast:'Жылдам режим (аз өту)',go:'Сығу',
+ pick:'Алдымен PDF таңдаңыз.',read:'Файл оқылуда...',est:(d,q,s)=>`Бағалау: ${d} DPI, сапа ${q} → ~${s}`,
+ page:(i,n)=>`Бет ${i} / ${n}`,again:'Әлі үлкен, сапаны төмендетіп қайталаймын...',
+ done:(a,b)=>`Дайын! ${a} → ${b}`,miss:'Назар аударыңыз: мақсатқа жетпеді, мақсатты өлшемді үлкейтіп көріңіз.',
+ dl:s=>`Жүктеп алу (${s})`,err:'Қате: ',
+ note:'Мәтін суретке айналады (белгілеуге және іздеуге болмайды). Телефонда үлкен файлдар (100+ МБ) жадқа сыймауы мүмкін: компьютерді қолданыңыз.'},
+uz:{title:'PDF siqish',file:'PDF fayl',target:'Kerakli hajm (MB)',fast:'Tezkor rejim (kamroq o‘tish)',go:'Siqish',
+ pick:'Avval PDF tanlang.',read:'Fayl o‘qilmoqda...',est:(d,q,s)=>`Baho: ${d} DPI, sifat ${q} → ~${s}`,
+ page:(i,n)=>`Sahifa ${i} / ${n}`,again:'Hali ham katta, sifatni tushirib qayta ishlayman...',
+ done:(a,b)=>`Tayyor! ${a} → ${b}`,miss:'Diqqat: maqsadga yetmadi, maqsadli hajmni kattaroq qilib ko‘ring.',
+ dl:s=>`Yuklab olish (${s})`,err:'Xato: ',
+ note:'Matn rasmga aylanadi (belgilab va qidirib bo‘lmaydi). Telefonda katta fayllar (100+ MB) xotiraga sig‘masligi mumkin: kompyuterdan foydalaning.'}
+};
+const $=id=>document.getElementById(id);
+let L=localStorage.getItem('lang');
+if(!I18N[L]){const n=(navigator.language||'ru').slice(0,2);L=I18N[n]?n:(n==='kk'?'kk':'ru');}
+function setLang(l){
+ L=l;try{localStorage.setItem('lang',l)}catch(e){}
+ const t=I18N[l];document.documentElement.lang=l;
+ $('t_title').textContent=t.title;$('t_file').textContent=t.file;$('t_target').textContent=t.target;
+ $('t_fast').textContent=t.fast;$('go').textContent=t.go;$('t_note').textContent=t.note;
+ document.querySelectorAll('.lang button').forEach(b=>b.classList.toggle('on',b.dataset.l===l));
+}
+document.querySelectorAll('.lang button').forEach(b=>b.onclick=()=>setLang(b.dataset.l));
+setLang(L);
+
+const T=()=>I18N[L];
+const log=t=>$('log').textContent=t, prog=p=>$('pb').style.width=(p*100)+'%';
+const mb=b=>(b/1048576).toFixed(2)+' MB';
+const PRESETS=[[130,.7],[110,.6],[96,.5],[80,.45],[72,.4],[60,.35],[50,.3],[40,.25]];
+const tick=()=>new Promise(r=>setTimeout(r));
+
+// one reusable canvas = less memory, faster
+const cv=document.createElement('canvas');
+const ctx=cv.getContext('2d',{alpha:false});
+
+async function renderPage(pdf,i,dpi,q){
+ const page=await pdf.getPage(i);
+ const vp=page.getViewport({scale:dpi/72});
+ cv.width=Math.ceil(vp.width);cv.height=Math.ceil(vp.height);
+ ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);
+ await page.render({canvasContext:ctx,viewport:vp}).promise;
+ const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',q));
+ const base=page.getViewport({scale:1});
+ page.cleanup();
+ return {blob,w:base.width,h:base.height};
+}
+
+async function pickPreset(pdf,target,fast,origSize){
+ const n=pdf.numPages,k=Math.min(fast?3:5,n),idx=[];
+ for(let j=0;j<k;j++)idx.push(Math.max(1,Math.round((j+.5)*n/k)));
+ const r=target/origSize;
+ let p=r<.02?3:r<.05?2:r<.15?1:0;           // skip hopeless high presets
+ const safety=fast?.8:.93;
+ for(;p<PRESETS.length;p++){
+  let sum=0;
+  for(const i of idx)sum+=(await renderPage(pdf,i,PRESETS[p][0],PRESETS[p][1])).blob.size;
+  const est=sum/idx.length*n+n*300;
+  log(T().est(PRESETS[p][0],PRESETS[p][1],mb(est)));
+  if(est<=target*safety)return p;
+ }
+ return PRESETS.length-1;
+}
+
+async function build(pdf,p){
+ const {jsPDF}=window.jspdf,n=pdf.numPages;let doc=null;
+ for(let i=1;i<=n;i++){
+  const r=await renderPage(pdf,i,PRESETS[p][0],PRESETS[p][1]);
+  const bytes=new Uint8Array(await r.blob.arrayBuffer());
+  const o=r.w>r.h?'l':'p';
+  if(!doc)doc=new jsPDF({unit:'pt',format:[r.w,r.h],orientation:o,compress:true});
+  else doc.addPage([r.w,r.h],o);
+  doc.addImage(bytes,'JPEG',0,0,r.w,r.h,undefined,'FAST');
+  prog(i/n);log(T().page(i,n));
+  if(i%5===0)await tick();
+ }
+ return doc.output('blob');
+}
+
+$('go').onclick=async()=>{
+ const f=$('file').files[0];
+ if(!f){log(T().pick);return;}
+ const target=parseFloat($('target').value)*1048576;
+ const fast=$('fast').checked;
+ $('go').disabled=true;$('dl').style.display='none';prog(0);
+ let url;
+ try{
+  log(T().read);
+  url=URL.createObjectURL(f);                 // stream from disk, no giant ArrayBuffer
+  const pdf=await pdfjsLib.getDocument({url,disableFontFace:true}).promise;
+  let p=await pickPreset(pdf,target,fast,f.size),blob;
+  while(true){
+   blob=await build(pdf,p);
+   if(blob.size<=target||p>=PRESETS.length-1)break;
+   p++;log(T().again);await tick();
+  }
+  const a=$('dl');
+  a.href=URL.createObjectURL(blob);
+  a.download=f.name.replace(/\.pdf$/i,'')+'-small.pdf';
+  a.textContent=T().dl(mb(blob.size));a.style.display='block';
+  log(T().done(mb(f.size),mb(blob.size))+(blob.size>target?'\n'+T().miss:''));
+ }catch(e){log(T().err+e.message);}
+ if(url)URL.revokeObjectURL(url);
+ $('go').disabled=false;
+};
+</script>
+</body>
+</html>
