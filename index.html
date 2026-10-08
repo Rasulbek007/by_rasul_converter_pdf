@@ -6,7 +6,6 @@
 <meta name="theme-color" content="#2563eb">
 <title>PDF Compressor</title>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{--bg:#f4f6f8;--card:#fff;--tx:#1e293b;--mut:#64748b;--ac:#2563eb;--bd:#cbd5e1}
 @media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--tx:#f1f5f9;--mut:#94a3b8;--bd:#475569}}
@@ -17,11 +16,11 @@ body{margin:0;min-height:100dvh;background:var(--bg);color:var(--tx);font-family
 .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:10px}
 h1{font-size:19px;margin:0}
 .lang{display:flex;gap:4px}
-.lang button{width:auto;margin:0;padding:8px 10px;font-size:13px;background:transparent;color:var(--tx);border:1px solid var(--bd);border-radius:8px;min-height:40px}
+.lang button{padding:8px 10px;font-size:13px;background:transparent;color:var(--tx);border:1px solid var(--bd);border-radius:8px;min-height:40px}
 .lang button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
 label{display:block;margin:14px 0 6px;font-size:14px;color:var(--mut)}
 input[type=file],input[type=number]{width:100%;padding:12px;font-size:16px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx)}
-.chk{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:14px}
+.chk{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:14px;color:var(--tx)}
 .chk input{width:22px;height:22px}
 #go{margin-top:18px;width:100%;min-height:52px;border:0;border-radius:12px;background:var(--ac);color:#fff;font-size:17px;font-weight:600}
 #go:disabled{opacity:.5}
@@ -40,7 +39,6 @@ input[type=file],input[type=number]{width:100%;padding:12px;font-size:16px;borde
  <input type="file" id="file" accept="application/pdf,.pdf">
  <label id="t_target"></label>
  <input type="number" id="target" value="5" min="0.3" step="0.5" inputmode="decimal">
- <label class="chk"><input type="checkbox" id="fast" checked><span id="t_fast"></span></label>
  <label class="chk"><input type="checkbox" id="gray" checked><span id="t_gray"></span></label>
  <label class="chk"><input type="checkbox" id="keep" checked><span id="t_keep"></span></label>
  <button id="go"></button>
@@ -51,39 +49,44 @@ input[type=file],input[type=number]{width:100%;padding:12px;font-size:16px;borde
 </div></div>
 
 <script>
+const WORKER='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 const I18N={
-ru:{title:'Сжатие PDF',file:'PDF файл',target:'Нужный размер (МБ)',fast:'Быстрый режим (меньше проходов)',go:'Сжать',
- pick:'Сначала выберите PDF.',read:'Читаю файл...',est:(d,q,s)=>`Оценка: ${d} DPI, качество ${q} → ~${s}`,
- page:(i,n)=>`Страница ${i} / ${n}`,again:'Всё ещё велик, снижаю качество и повторяю...',
- done:(a,b)=>`Готово! ${a} → ${b}`,miss:'Внимание: до цели не дошло, попробуйте увеличить целевой размер.',
+ru:{title:'Сжатие PDF',file:'PDF файл',target:'Нужный размер (МБ)',go:'Сжать',
+ gray:'Ч/б режим для текста (чётче и легче)',keep:'Не ухудшать читаемость (мин. 110 DPI)',
+ pick:'Сначала выберите PDF.',read:'Читаю файл...',
+ page:(i,n,d,s)=>`Страница ${i} / ${n}  ·  ${d} DPI  ·  итого ${s}`,
+ done:(a,b)=>`Готово! ${a} → ${b}`,
+ miss:'Внимание: до цели не дошло. Увеличьте целевой размер.',
+ floor:s=>`Предел читаемости: получилось ${s}. Для меньшего размера отключите защиту читаемости или поставьте цель побольше.`,
  dl:s=>`Скачать (${s})`,err:'Ошибка: ',
- note:'Текст станет изображением (нельзя выделить и искать). На телефоне большие файлы (100+ МБ) могут не поместиться в память: используйте компьютер.'},
-kk:{title:'PDF сығу',file:'PDF файл',target:'Қажетті өлшем (МБ)',fast:'Жылдам режим (аз өту)',go:'Сығу',
- pick:'Алдымен PDF таңдаңыз.',read:'Файл оқылуда...',est:(d,q,s)=>`Бағалау: ${d} DPI, сапа ${q} → ~${s}`,
- page:(i,n)=>`Бет ${i} / ${n}`,again:'Әлі үлкен, сапаны төмендетіп қайталаймын...',
- done:(a,b)=>`Дайын! ${a} → ${b}`,miss:'Назар аударыңыз: мақсатқа жетпеді, мақсатты өлшемді үлкейтіп көріңіз.',
+ note:'Текст станет изображением (нельзя выделить и искать). Бюджет размера распределяется по страницам автоматически: результат ≈ целевой размер за один проход. Экран не гаснет во время работы.'},
+kk:{title:'PDF сығу',file:'PDF файл',target:'Қажетті өлшем (МБ)',go:'Сығу',
+ gray:'Мәтінге арналған а/қ режим (анығырақ, жеңіл)',keep:'Оқылымдылықты төмендетпеу (кемі 110 DPI)',
+ pick:'Алдымен PDF таңдаңыз.',read:'Файл оқылуда...',
+ page:(i,n,d,s)=>`Бет ${i} / ${n}  ·  ${d} DPI  ·  барлығы ${s}`,
+ done:(a,b)=>`Дайын! ${a} → ${b}`,
+ miss:'Назар аударыңыз: мақсатқа жетпеді. Мақсатты өлшемді үлкейтіп көріңіз.',
+ floor:s=>`Оқылым шегі: ${s} болды. Кішірек өлшем үшін қорғауды өшіріңіз немесе мақсатты үлкейтіңіз.`,
  dl:s=>`Жүктеп алу (${s})`,err:'Қате: ',
- note:'Мәтін суретке айналады (белгілеуге және іздеуге болмайды). Телефонда үлкен файлдар (100+ МБ) жадқа сыймауы мүмкін: компьютерді қолданыңыз.'},
-uz:{title:'PDF siqish',file:'PDF fayl',target:'Kerakli hajm (MB)',fast:'Tezkor rejim (kamroq o‘tish)',go:'Siqish',
- pick:'Avval PDF tanlang.',read:'Fayl o‘qilmoqda...',est:(d,q,s)=>`Baho: ${d} DPI, sifat ${q} → ~${s}`,
- page:(i,n)=>`Sahifa ${i} / ${n}`,again:'Hali ham katta, sifatni tushirib qayta ishlayman...',
- done:(a,b)=>`Tayyor! ${a} → ${b}`,miss:'Diqqat: maqsadga yetmadi, maqsadli hajmni kattaroq qilib ko‘ring.',
+ note:'Мәтін суретке айналады (белгілеуге және іздеуге болмайды). Өлшем бюджеті беттерге автоматты бөлінеді: нәтиже бір өтуде мақсатты өлшемге жақын болады. Жұмыс кезінде экран өшпейді.'},
+uz:{title:'PDF siqish',file:'PDF fayl',target:'Kerakli hajm (MB)',go:'Siqish',
+ gray:'Matn uchun oq-qora rejim (aniqroq, yengil)',keep:'O‘qilishni yomonlashtirmaslik (kamida 110 DPI)',
+ pick:'Avval PDF tanlang.',read:'Fayl o‘qilmoqda...',
+ page:(i,n,d,s)=>`Sahifa ${i} / ${n}  ·  ${d} DPI  ·  jami ${s}`,
+ done:(a,b)=>`Tayyor! ${a} → ${b}`,
+ miss:'Diqqat: maqsadga yetmadi. Maqsadli hajmni kattaroq qilib ko‘ring.',
+ floor:s=>`O‘qilish chegarasi: ${s} chiqdi. Kichikroq hajm uchun himoyani o‘chiring yoki maqsadni kattalashtiring.`,
  dl:s=>`Yuklab olish (${s})`,err:'Xato: ',
- note:'Matn rasmga aylanadi (belgilab va qidirib bo‘lmaydi). Telefonda katta fayllar (100+ MB) xotiraga sig‘masligi mumkin: kompyuterdan foydalaning.'}
+ note:'Matn rasmga aylanadi (belgilab va qidirib bo‘lmaydi). Hajm byudjeti sahifalarga avtomatik taqsimlanadi: natija bir o‘tishda maqsadli hajmga yaqin bo‘ladi. Ishlash vaqtida ekran o‘chmaydi.'}
 };
-const X={
-ru:{gray:'Ч/б режим для текста (чётче и легче)',keep:'Не ухудшать читаемость (мин. 110 DPI)',floor:s=>`Предел читаемости: получилось ${s}. Для меньшего размера отключите защиту читаемости или поставьте цель побольше.`},
-kk:{gray:'Мәтінге арналған а/қ режим (анығырақ, жеңіл)',keep:'Оқылымдылықты төмендетпеу (кемі 110 DPI)',floor:s=>`Оқылым шегі: ${s} болды. Кішірек өлшем үшін қорғауды өшіріңіз немесе мақсатты үлкейтіңіз.`},
-uz:{gray:'Matn uchun oq-qora rejim (aniqroq, yengil)',keep:'O‘qilishni yomonlashtirmaslik (kamida 110 DPI)',floor:s=>`O‘qilish chegarasi: ${s} chiqdi. Kichikroq hajm uchun himoyani o‘chiring yoki maqsadni kattalashtiring.`}};
-for(const k in X)Object.assign(I18N[k],X[k]);
 const $=id=>document.getElementById(id);
-let L=localStorage.getItem('lang');
-if(!I18N[L]){const n=(navigator.language||'ru').slice(0,2);L=I18N[n]?n:(n==='kk'?'kk':'ru');}
+let L=null;try{L=localStorage.getItem('lang')}catch(e){}
+if(!I18N[L]){const n=(navigator.language||'ru').slice(0,2);L=I18N[n]?n:'ru';}
 function setLang(l){
  L=l;try{localStorage.setItem('lang',l)}catch(e){}
  const t=I18N[l];document.documentElement.lang=l;
  $('t_title').textContent=t.title;$('t_file').textContent=t.file;$('t_target').textContent=t.target;
- $('t_fast').textContent=t.fast;$('t_gray').textContent=t.gray;$('t_keep').textContent=t.keep;$('go').textContent=t.go;$('t_note').textContent=t.note;
+ $('t_gray').textContent=t.gray;$('t_keep').textContent=t.keep;$('go').textContent=t.go;$('t_note').textContent=t.note;
  document.querySelectorAll('.lang button').forEach(b=>b.classList.toggle('on',b.dataset.l===l));
 }
 document.querySelectorAll('.lang button').forEach(b=>b.onclick=()=>setLang(b.dataset.l));
@@ -92,92 +95,164 @@ setLang(L);
 const T=()=>I18N[L];
 const log=t=>$('log').textContent=t, prog=p=>$('pb').style.width=(p*100)+'%';
 const mb=b=>(b/1048576).toFixed(2)+' MB';
-const COLOR=[[150,.6],[130,.55],[110,.5],[96,.45],[80,.4],[60,.35]];
-const GRAY=[[160,.55],[140,.5],[125,.45],[110,.4],[96,.4],[80,.35],[60,.3]];
-let PRESETS=GRAY,GRAYON=true;
 const tick=()=>new Promise(r=>setTimeout(r));
+const toBlob=(c,q)=>new Promise(r=>c.toBlob(r,'image/jpeg',q));
 
-// one reusable canvas = less memory, faster
-const cv=document.createElement('canvas');
-const ctx=cv.getContext('2d',{alpha:false});
+/* ---------- canvases (reused, minimal memory) ---------- */
+const cv=document.createElement('canvas'),ctx=cv.getContext('2d',{alpha:false,willReadFrequently:true});
+const cv2=document.createElement('canvas'),ctx2=cv2.getContext('2d',{alpha:false});
+ctx2.imageSmoothingEnabled=true;ctx2.imageSmoothingQuality='high';
 
-async function renderPage(pdf,i,dpi,q){
- const page=await pdf.getPage(i);
- const vp=page.getViewport({scale:dpi/72});
+const DPI_LADDER=[150,130,115,100,85,70,60];
+const Q_LADDER=[.6,.48,.38,.3,.24];
+const OPT={gray:true,floor:110};
+
+/* adaptive levels: paper -> white, ink -> black (works on shadows/yellowish scans) */
+function applyLevels(im){
+ const d=im.data,n=d.length>>2,h=new Uint32Array(256);
+ for(let j=0;j<d.length;j+=4)h[(d[j]*77+d[j+1]*150+d[j+2]*29)>>8]++;
+ let c=0,lo=0,med=255,gotLo=false;
+ for(let v=0;v<256;v++){
+  c+=h[v];
+  if(!gotLo&&c>=n*.01){lo=v;gotLo=true}
+  if(c>=n*.5){med=v;break}
+ }
+ const white=Math.min(250,Math.max(110,med*.92));
+ const black=Math.min(lo+(white-lo)*.12,white-30);
+ const lut=new Uint8ClampedArray(256),k=255/(white-black);
+ for(let v=0;v<256;v++)lut[v]=(v-black)*k;
+ for(let j=0;j<d.length;j+=4){
+  const g=lut[(d[j]*77+d[j+1]*150+d[j+2]*29)>>8];
+  d[j]=d[j+1]=d[j+2]=g;
+ }
+}
+
+/* render one page once at max DPI, then walk the ladder until it fits the budget */
+async function encodePage(page,budget){
+ const base=page.getViewport({scale:1});
+ let sc=DPI_LADDER[0]/72;
+ const maxPx=7e6;
+ if(base.width*base.height*sc*sc>maxPx)sc=Math.sqrt(maxPx/(base.width*base.height));
+ const dpi0=sc*72,vp=page.getViewport({scale:sc});
  cv.width=Math.ceil(vp.width);cv.height=Math.ceil(vp.height);
  ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);
  await page.render({canvasContext:ctx,viewport:vp}).promise;
- if(GRAYON){ // grayscale + levels: whiter paper, darker text, smaller JPEG
-  const im=ctx.getImageData(0,0,cv.width,cv.height),d=im.data;
-  for(let j=0;j<d.length;j+=4){
-   let v=(0.299*d[j]+0.587*d[j+1]+0.114*d[j+2]-60)*1.8;
-   v=v<0?0:v>255?255:v;d[j]=d[j+1]=d[j+2]=v;
+ if(OPT.gray){const im=ctx.getImageData(0,0,cv.width,cv.height);applyLevels(im);ctx.putImageData(im,0,0);}
+
+ const floor=OPT.floor;
+ let ladder=DPI_LADDER.filter(d=>d>=floor&&d<=dpi0+.5);
+ if(!ladder.length)ladder=[dpi0];
+ if(ladder[0]<dpi0-1&&dpi0<DPI_LADDER[0])ladder.unshift(dpi0);
+
+ let best=null;
+ for(const dpi of ladder){
+  const s=Math.min(1,dpi/dpi0);
+  const w=Math.max(1,Math.round(cv.width*s)),h=Math.max(1,Math.round(cv.height*s));
+  let src=cv;
+  if(s<.995){cv2.width=w;cv2.height=h;ctx2.fillStyle='#fff';ctx2.fillRect(0,0,w,h);ctx2.drawImage(cv,0,0,w,h);src=cv2;}
+  for(const q of Q_LADDER){
+   const blob=await toBlob(src,q);
+   if(!best||blob.size<best.blob.size)best={blob,w:src.width,h:src.height,dpi:Math.round(dpi)};
+   if(blob.size<=budget)return Object.assign(best,{pw:base.width,ph:base.height,blob,w:src.width,h:src.height,dpi:Math.round(dpi),fit:true});
   }
-  ctx.putImageData(im,0,0);
  }
- const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',q));
- const base=page.getViewport({scale:1});
- page.cleanup();
- return {blob,w:base.width,h:base.height};
+ best.pw=base.width;best.ph=base.height;best.fit=false;
+ return best;
 }
 
-async function pickPreset(pdf,target,fast,origSize){
- const n=pdf.numPages,k=Math.min(fast?3:5,n),idx=[];
- for(let j=0;j<k;j++)idx.push(Math.max(1,Math.round((j+.5)*n/k)));
- const r=target/origSize;
- let p=0;
- const safety=fast?.8:.93;
- for(;p<PRESETS.length;p++){
-  let sum=0;
-  for(const i of idx)sum+=(await renderPage(pdf,i,PRESETS[p][0],PRESETS[p][1])).blob.size;
-  const est=sum/idx.length*n+n*300;
-  log(T().est(PRESETS[p][0],PRESETS[p][1],mb(est)));
-  if(est<=target*safety)return p;
- }
- return PRESETS.length-1;
+/* ---------- minimal PDF writer: JPEG streams as-is, tiny overhead ---------- */
+function PDFW(){
+ const parts=[],off=[];let len=0;
+ const enc=s=>{const u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i)&255;return u};
+ const add=x=>{if(typeof x==='string')x=enc(x);parts.push(x);len+=x.size!==undefined?x.size:x.length};
+ const f2=v=>(+v).toFixed(2);
+ add('%PDF-1.4\n');add(new Uint8Array([0x25,0xE2,0xE3,0xCF,0xD3,0x0A]));
+ return{
+  len:()=>len,
+  page(i,r){
+   const im=3+3*i,ct=im+1,pg=im+2;
+   off[im]=len;
+   add(`${im} 0 obj\n<</Type/XObject/Subtype/Image/Width ${r.w}/Height ${r.h}/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length ${r.blob.size}>>\nstream\n`);
+   add(r.blob);add('\nendstream\nendobj\n');
+   const cs=`q ${f2(r.pw)} 0 0 ${f2(r.ph)} 0 0 cm /Im0 Do Q`;
+   off[ct]=len;
+   add(`${ct} 0 obj\n<</Length ${cs.length}>>\nstream\n${cs}\nendstream\nendobj\n`);
+   off[pg]=len;
+   add(`${pg} 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${f2(r.pw)} ${f2(r.ph)}]/Resources<</XObject<</Im0 ${im} 0 R>>>>/Contents ${ct} 0 R>>\nendobj\n`);
+  },
+  finish(n){
+   const kids=[];for(let i=0;i<n;i++)kids.push(`${5+3*i} 0 R`);
+   off[2]=len;add(`2 0 obj\n<</Type/Pages/Count ${n}/Kids[${kids.join(' ')}]>>\nendobj\n`);
+   off[1]=len;add('1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n');
+   const K=3+3*n,xs=len;
+   let x=`xref\n0 ${K}\n0000000000 65535 f \n`;
+   for(let i=1;i<K;i++)x+=String(off[i]).padStart(10,'0')+' 00000 n \n';
+   x+=`trailer\n<</Size ${K}/Root 1 0 R>>\nstartxref\n${xs}\n%%EOF\n`;
+   add(x);
+   return new Blob(parts,{type:'application/pdf'});
+  }
+ };
 }
 
-async function build(pdf,p){
- const {jsPDF}=window.jspdf,n=pdf.numPages;let doc=null;
- for(let i=1;i<=n;i++){
-  const r=await renderPage(pdf,i,PRESETS[p][0],PRESETS[p][1]);
-  const bytes=new Uint8Array(await r.blob.arrayBuffer());
-  const o=r.w>r.h?'l':'p';
-  if(!doc)doc=new jsPDF({unit:'pt',format:[r.w,r.h],orientation:o,compress:true});
-  else doc.addPage([r.w,r.h],o);
-  doc.addImage(bytes,'JPEG',0,0,r.w,r.h,undefined,'FAST');
-  prog(i/n);log(T().page(i,n));
-  if(i%5===0)await tick();
+/* ---------- open PDF: read only needed byte ranges (no 200 MB in RAM) ---------- */
+async function openPdf(f,mode){
+ if(mode==='range'){
+  const first=new Uint8Array(await f.slice(0,Math.min(f.size,65536)).arrayBuffer());
+  const tr=new pdfjsLib.PDFDataRangeTransport(f.size,first);
+  tr.requestDataRange=(b,e)=>{f.slice(b,e).arrayBuffer().then(buf=>tr.onDataRange(b,new Uint8Array(buf)));};
+  return pdfjsLib.getDocument({range:tr,length:f.size,disableAutoFetch:true,disableFontFace:true}).promise;
  }
- return doc.output('blob');
+ return pdfjsLib.getDocument({data:new Uint8Array(await f.arrayBuffer()),disableFontFace:true}).promise;
+}
+
+async function run(f,target,mode){
+ pdfjsLib.GlobalWorkerOptions.workerSrc=WORKER;
+ const pdf=await openPdf(f,mode);
+ const n=pdf.numPages,w=PDFW();
+ let miss=0;
+ for(let i=0;i<n;i++){
+  // fair share of what is left: unused budget of light pages flows to heavy pages
+  const budget=Math.max(3000,(target*.985-2000-w.len())/(n-i)-520);
+  const page=await pdf.getPage(i+1);
+  const r=await encodePage(page,budget);
+  page.cleanup();
+  if(!r.fit)miss++;
+  w.page(i,r);
+  prog((i+1)/n);log(T().page(i+1,n,r.dpi,mb(w.len())));
+  if(i%15===14)await pdf.cleanup();
+  await tick();
+ }
+ const blob=w.finish(n);
+ await pdf.destroy();
+ return blob;
 }
 
 $('go').onclick=async()=>{
  const f=$('file').files[0];
  if(!f){log(T().pick);return;}
  const target=parseFloat($('target').value)*1048576;
- const fast=$('fast').checked,keep=$('keep').checked;
- GRAYON=$('gray').checked;
- PRESETS=(GRAYON?GRAY:COLOR).filter(q=>!keep||q[0]>=110);
+ if(!(target>0)){return;}
+ OPT.gray=$('gray').checked;
+ const keep=$('keep').checked;
+ OPT.floor=keep?110:55;
  $('go').disabled=true;$('dl').style.display='none';prog(0);
- let url;
+ let lock=null;
+ try{lock=await navigator.wakeLock.request('screen')}catch(e){}
  try{
   log(T().read);
-  url=URL.createObjectURL(f);                 // stream from disk, no giant ArrayBuffer
-  const pdf=await pdfjsLib.getDocument({url,disableFontFace:true}).promise;
-  let p=await pickPreset(pdf,target,fast,f.size),blob;
-  while(true){
-   blob=await build(pdf,p);
-   if(blob.size<=target||p>=PRESETS.length-1)break;
-   p++;log(T().again);await tick();
+  let blob=null,err=null;
+  for(const mode of ['range','full']){
+   try{blob=await run(f,target,mode);break;}catch(e){err=e;prog(0);}
   }
+  if(!blob)throw err;
   const a=$('dl');
   a.href=URL.createObjectURL(blob);
   a.download=f.name.replace(/\.pdf$/i,'')+'-small.pdf';
   a.textContent=T().dl(mb(blob.size));a.style.display='block';
   log(T().done(mb(f.size),mb(blob.size))+(blob.size>target?'\n'+(keep?T().floor(mb(blob.size)):T().miss):''));
- }catch(e){log(T().err+e.message);}
- if(url)URL.revokeObjectURL(url);
+ }catch(e){log(T().err+(e&&e.message||e));}
+ cv.width=cv.height=cv2.width=cv2.height=0;
+ try{lock&&lock.release()}catch(e){}
  $('go').disabled=false;
 };
 </script>
