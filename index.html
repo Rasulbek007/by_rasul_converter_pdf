@@ -41,6 +41,8 @@ input[type=file],input[type=number]{width:100%;padding:12px;font-size:16px;borde
  <label id="t_target"></label>
  <input type="number" id="target" value="5" min="0.3" step="0.5" inputmode="decimal">
  <label class="chk"><input type="checkbox" id="fast" checked><span id="t_fast"></span></label>
+ <label class="chk"><input type="checkbox" id="gray" checked><span id="t_gray"></span></label>
+ <label class="chk"><input type="checkbox" id="keep" checked><span id="t_keep"></span></label>
  <button id="go"></button>
  <div class="bar"><div id="pb"></div></div>
  <div id="log"></div>
@@ -69,6 +71,11 @@ uz:{title:'PDF siqish',file:'PDF fayl',target:'Kerakli hajm (MB)',fast:'Tezkor r
  dl:s=>`Yuklab olish (${s})`,err:'Xato: ',
  note:'Matn rasmga aylanadi (belgilab va qidirib bo‘lmaydi). Telefonda katta fayllar (100+ MB) xotiraga sig‘masligi mumkin: kompyuterdan foydalaning.'}
 };
+const X={
+ru:{gray:'Ч/б режим для текста (чётче и легче)',keep:'Не ухудшать читаемость (мин. 110 DPI)',floor:s=>`Предел читаемости: получилось ${s}. Для меньшего размера отключите защиту читаемости или поставьте цель побольше.`},
+kk:{gray:'Мәтінге арналған а/қ режим (анығырақ, жеңіл)',keep:'Оқылымдылықты төмендетпеу (кемі 110 DPI)',floor:s=>`Оқылым шегі: ${s} болды. Кішірек өлшем үшін қорғауды өшіріңіз немесе мақсатты үлкейтіңіз.`},
+uz:{gray:'Matn uchun oq-qora rejim (aniqroq, yengil)',keep:'O‘qilishni yomonlashtirmaslik (kamida 110 DPI)',floor:s=>`O‘qilish chegarasi: ${s} chiqdi. Kichikroq hajm uchun himoyani o‘chiring yoki maqsadni kattalashtiring.`}};
+for(const k in X)Object.assign(I18N[k],X[k]);
 const $=id=>document.getElementById(id);
 let L=localStorage.getItem('lang');
 if(!I18N[L]){const n=(navigator.language||'ru').slice(0,2);L=I18N[n]?n:(n==='kk'?'kk':'ru');}
@@ -76,7 +83,7 @@ function setLang(l){
  L=l;try{localStorage.setItem('lang',l)}catch(e){}
  const t=I18N[l];document.documentElement.lang=l;
  $('t_title').textContent=t.title;$('t_file').textContent=t.file;$('t_target').textContent=t.target;
- $('t_fast').textContent=t.fast;$('go').textContent=t.go;$('t_note').textContent=t.note;
+ $('t_fast').textContent=t.fast;$('t_gray').textContent=t.gray;$('t_keep').textContent=t.keep;$('go').textContent=t.go;$('t_note').textContent=t.note;
  document.querySelectorAll('.lang button').forEach(b=>b.classList.toggle('on',b.dataset.l===l));
 }
 document.querySelectorAll('.lang button').forEach(b=>b.onclick=()=>setLang(b.dataset.l));
@@ -85,7 +92,9 @@ setLang(L);
 const T=()=>I18N[L];
 const log=t=>$('log').textContent=t, prog=p=>$('pb').style.width=(p*100)+'%';
 const mb=b=>(b/1048576).toFixed(2)+' MB';
-const PRESETS=[[130,.7],[110,.6],[96,.5],[80,.45],[72,.4],[60,.35],[50,.3],[40,.25]];
+const COLOR=[[150,.6],[130,.55],[110,.5],[96,.45],[80,.4],[60,.35]];
+const GRAY=[[160,.55],[140,.5],[125,.45],[110,.4],[96,.4],[80,.35],[60,.3]];
+let PRESETS=GRAY,GRAYON=true;
 const tick=()=>new Promise(r=>setTimeout(r));
 
 // one reusable canvas = less memory, faster
@@ -98,6 +107,14 @@ async function renderPage(pdf,i,dpi,q){
  cv.width=Math.ceil(vp.width);cv.height=Math.ceil(vp.height);
  ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);
  await page.render({canvasContext:ctx,viewport:vp}).promise;
+ if(GRAYON){ // grayscale + levels: whiter paper, darker text, smaller JPEG
+  const im=ctx.getImageData(0,0,cv.width,cv.height),d=im.data;
+  for(let j=0;j<d.length;j+=4){
+   let v=(0.299*d[j]+0.587*d[j+1]+0.114*d[j+2]-60)*1.8;
+   v=v<0?0:v>255?255:v;d[j]=d[j+1]=d[j+2]=v;
+  }
+  ctx.putImageData(im,0,0);
+ }
  const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',q));
  const base=page.getViewport({scale:1});
  page.cleanup();
@@ -108,7 +125,7 @@ async function pickPreset(pdf,target,fast,origSize){
  const n=pdf.numPages,k=Math.min(fast?3:5,n),idx=[];
  for(let j=0;j<k;j++)idx.push(Math.max(1,Math.round((j+.5)*n/k)));
  const r=target/origSize;
- let p=r<.02?3:r<.05?2:r<.15?1:0;           // skip hopeless high presets
+ let p=0;
  const safety=fast?.8:.93;
  for(;p<PRESETS.length;p++){
   let sum=0;
@@ -139,7 +156,9 @@ $('go').onclick=async()=>{
  const f=$('file').files[0];
  if(!f){log(T().pick);return;}
  const target=parseFloat($('target').value)*1048576;
- const fast=$('fast').checked;
+ const fast=$('fast').checked,keep=$('keep').checked;
+ GRAYON=$('gray').checked;
+ PRESETS=(GRAYON?GRAY:COLOR).filter(q=>!keep||q[0]>=110);
  $('go').disabled=true;$('dl').style.display='none';prog(0);
  let url;
  try{
@@ -156,7 +175,7 @@ $('go').onclick=async()=>{
   a.href=URL.createObjectURL(blob);
   a.download=f.name.replace(/\.pdf$/i,'')+'-small.pdf';
   a.textContent=T().dl(mb(blob.size));a.style.display='block';
-  log(T().done(mb(f.size),mb(blob.size))+(blob.size>target?'\n'+T().miss:''));
+  log(T().done(mb(f.size),mb(blob.size))+(blob.size>target?'\n'+(keep?T().floor(mb(blob.size)):T().miss):''));
  }catch(e){log(T().err+e.message);}
  if(url)URL.revokeObjectURL(url);
  $('go').disabled=false;
